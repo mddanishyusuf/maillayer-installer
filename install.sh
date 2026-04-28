@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # maillayer self-host installer.
 #
-#   curl -fsSL https://install.<your-domain>/install.sh | sudo bash
+#   curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 #
 # Or for paranoid users:
-#   curl -fsSL https://install.<your-domain>/install.sh -o install.sh
+#   curl -fsSL https://install.maillayer.com/install.sh -o install.sh
 #   less install.sh
 #   sudo bash install.sh
 #

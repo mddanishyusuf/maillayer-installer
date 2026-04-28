@@ -7,7 +7,7 @@ One-line installer for [maillayer](https://github.com/mddanishyusuf/maillayer-pr
 Requires Docker + Docker Compose v2 already installed (`curl -fsSL https://get.docker.com | sudo sh` if not).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mddanishyusuf/maillayer-installer/main/install.sh | sudo bash
+curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 ```
 
 The script:
@@ -20,7 +20,7 @@ The script:
 ### Prefer to read first?
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mddanishyusuf/maillayer-installer/main/install.sh -o install.sh
+curl -fsSL https://install.maillayer.com/install.sh -o install.sh
 less install.sh
 sudo bash install.sh
 ```
@@ -31,7 +31,7 @@ sudo bash install.sh
 MAILLAYER_PORT=8080 \
 MAILLAYER_URL=https://mail.example.com \
 MAILLAYER_DIR=/var/lib/maillayer \
-  curl -fsSL https://raw.githubusercontent.com/mddanishyusuf/maillayer-installer/main/install.sh | sudo bash
+  curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 ```
 
 ## Maintenance
