@@ -19,6 +19,7 @@
 #   MAILLAYER_IMAGE=ghcr.io/owner/repo:1   override image tag
 #   MAILLAYER_DOMAIN=mail.example.com   public domain — turns on Caddy reverse proxy + Let's Encrypt
 #   MAILLAYER_EMAIL=you@example.com     contact email for ACME (required when DOMAIN is set)
+#   MAILLAYER_NO_AUTO_DOCKER=1          do NOT auto-install Docker if missing (default: auto-install)
 #
 # This file lives in the app repo as the source of truth. The public
 # install.sh URL serves a copy from a separate public installer repo (the
@@ -44,15 +45,44 @@ require_root() {
   fi
 }
 
+install_docker() {
+  bold "Docker not found — auto-installing via https://get.docker.com…"
+  echo "  This is Docker Inc's official installer. Takes ~60s on a typical VPS"
+  echo "  and installs Docker Engine + the Compose v2 plugin."
+  echo "  To skip and install Docker yourself, re-run with:"
+  echo "    MAILLAYER_NO_AUTO_DOCKER=1 curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
+  echo
+  if ! curl -fsSL https://get.docker.com | sh; then
+    red "Docker auto-install failed."
+    echo "  Install manually following https://docs.docker.com/engine/install/"
+    echo "  then re-run this script."
+    exit 1
+  fi
+  # get.docker.com handles enable/start on most distros, but be defensive —
+  # some minimal images leave the service installed-but-not-running.
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now docker >/dev/null 2>&1 || true
+  fi
+}
+
 require_docker() {
   if ! command -v docker >/dev/null 2>&1; then
-    red "Docker is not installed."
-    echo "  Install it first: curl -fsSL https://get.docker.com | sudo sh"
-    exit 1
+    if [ "${MAILLAYER_NO_AUTO_DOCKER:-0}" = "1" ]; then
+      red "Docker is not installed (and MAILLAYER_NO_AUTO_DOCKER=1 disabled auto-install)."
+      echo "  Install it first: curl -fsSL https://get.docker.com | sudo sh"
+      exit 1
+    fi
+    install_docker
+    if ! command -v docker >/dev/null 2>&1; then
+      red "Docker auto-install completed but 'docker' is still not on PATH."
+      echo "  Try logging out and back in, or run:  hash -r  &&  command -v docker"
+      exit 1
+    fi
   fi
   if ! docker compose version >/dev/null 2>&1; then
     red "Docker Compose v2 is required."
     echo "  Install the docker-compose-plugin package, or upgrade Docker."
+    echo "  On Debian/Ubuntu: apt-get install -y docker-compose-plugin"
     exit 1
   fi
 }

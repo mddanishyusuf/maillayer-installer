@@ -4,19 +4,20 @@ One-line installer for [maillayer](https://github.com/mddanishyusuf/maillayer-pr
 
 ## Install on any Linux VPS
 
-Requires Docker + Docker Compose v2 already installed (`curl -fsSL https://get.docker.com | sudo sh` if not).
-
 ```sh
 curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 ```
 
+That's it — even on a fresh box. If Docker isn't installed, the script will install it for you using Docker Inc's official `get.docker.com` installer. To skip the auto-install (e.g. you manage Docker yourself), set `MAILLAYER_NO_AUTO_DOCKER=1`.
+
 The script:
 
-1. Checks that Docker + Docker Compose v2 are present and the host port (default `8024`) is free.
-2. Generates a unique `AUTH_SECRET` (saved at `/opt/maillayer/.env`, mode 600).
-3. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1`.
-4. Starts the service via Docker Compose with a managed volume for your data.
-5. Waits for `/api/health` and prints the URL.
+1. Auto-installs Docker + Docker Compose v2 if they aren't already present.
+2. Checks that the host port (default `8024`) is free.
+3. Generates a unique `AUTH_SECRET` (saved at `/opt/maillayer/.env`, mode 600).
+4. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1`.
+5. Starts the service via Docker Compose with a managed volume for your data.
+6. Waits for `/api/health` and prints the URL.
 
 ## Install with a custom domain + auto-TLS
 
@@ -61,6 +62,7 @@ MAILLAYER_DIR=/var/lib/maillayer \
 | `MAILLAYER_IMAGE` | `ghcr.io/mddanishyusuf/maillayer-pro:1` | Image tag (pin to `:v1.1.0` for a fixed version) |
 | `MAILLAYER_DOMAIN` | (empty) | Public domain — turns on Caddy reverse proxy |
 | `MAILLAYER_EMAIL` | (empty) | ACME contact email — required when `MAILLAYER_DOMAIN` is set |
+| `MAILLAYER_NO_AUTO_DOCKER` | `0` | Set to `1` to disable the Docker auto-install — useful if you manage Docker yourself |
 
 ## Maintenance
 
@@ -92,7 +94,7 @@ cd /opt/maillayer && docker compose down
 - Generates a random secret via `openssl rand -base64 48`.
 - Starts the container.
 
-It does NOT install Docker itself, modify firewall rules, edit other system services, or make outbound calls beyond pulling the Docker image. Read [install.sh](install.sh) before running.
+It does NOT modify firewall rules, edit other system services beyond Docker, or make outbound calls beyond pulling the Docker image and (if Docker is missing) Docker Inc's official `get.docker.com` installer. The Docker auto-install can be disabled with `MAILLAYER_NO_AUTO_DOCKER=1`. Read [install.sh](install.sh) before running.
 
 ## Backup
 
