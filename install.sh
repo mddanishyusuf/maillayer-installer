@@ -3,9 +3,15 @@
 #
 #   curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 #
-# With a domain + auto-TLS via Caddy:
-#   MAILLAYER_DOMAIN=mail.example.com MAILLAYER_EMAIL=you@example.com \
-#     curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash
+# By default the installer ships a small Caddy sidecar alongside the
+# maillayer container so you can point a custom domain at this server and
+# get auto-issued HTTPS — no DNS or cert work on your side beyond pointing
+# the A record. Add the domain in the dashboard at:
+#
+#   Settings → Domain
+#
+# Don't want a managed reverse proxy? Set MAILLAYER_NO_CADDY=1 and the
+# installer skips Caddy; bring your own nginx / Traefik / Cloudflare Tunnel.
 #
 # Or for paranoid users:
 #   curl -fsSL https://install.maillayer.com/install.sh -o install.sh
@@ -14,11 +20,10 @@
 #
 # Override defaults via env vars (passed before the curl):
 #   MAILLAYER_DIR=/opt/maillayer        install root
-#   MAILLAYER_PORT=8024                 host port (loopback-only when DOMAIN is set)
-#   MAILLAYER_URL=https://...           public URL (auto-set to https://DOMAIN in domain mode)
+#   MAILLAYER_PORT=8024                 dashboard host port (always exposed for local access)
+#   MAILLAYER_URL=https://...           public URL — set this if you proxy externally
 #   MAILLAYER_IMAGE=ghcr.io/owner/repo:1   override image tag
-#   MAILLAYER_DOMAIN=mail.example.com   public domain — turns on Caddy reverse proxy + Let's Encrypt
-#   MAILLAYER_EMAIL=you@example.com     contact email for ACME (required when DOMAIN is set)
+#   MAILLAYER_NO_CADDY=1                skip the bundled Caddy sidecar (manage HTTPS yourself)
 #   MAILLAYER_NO_AUTO_DOCKER=1          do NOT auto-install Docker if missing (default: auto-install)
 #
 # This file lives in the app repo as the source of truth. The public
@@ -31,8 +36,7 @@ INSTALL_DIR="${MAILLAYER_DIR:-/opt/maillayer}"
 PORT="${MAILLAYER_PORT:-8024}"
 APP_URL="${MAILLAYER_URL:-}"
 IMAGE="${MAILLAYER_IMAGE:-ghcr.io/mddanishyusuf/maillayer-pro:1}"
-DOMAIN="${MAILLAYER_DOMAIN:-}"
-ACME_EMAIL="${MAILLAYER_EMAIL:-}"
+NO_CADDY="${MAILLAYER_NO_CADDY:-0}"
 
 red()    { printf "\033[0;31m%s\033[0m\n" "$*"; }
 green()  { printf "\033[0;32m%s\033[0m\n" "$*"; }
@@ -58,8 +62,6 @@ install_docker() {
     echo "  then re-run this script."
     exit 1
   fi
-  # get.docker.com handles enable/start on most distros, but be defensive —
-  # some minimal images leave the service installed-but-not-running.
   if command -v systemctl >/dev/null 2>&1; then
     systemctl enable --now docker >/dev/null 2>&1 || true
   fi
@@ -104,17 +106,19 @@ port_in_use() {
 }
 
 require_ports_free() {
-  if [ -n "$DOMAIN" ]; then
-    # Caddy needs 80 + 443. The maillayer container is loopback-only on PORT.
+  if [ "$NO_CADDY" != "1" ]; then
+    # Caddy needs 80 + 443. The maillayer container exposes PORT for the
+    # local-IP dashboard regardless.
     for p in 80 443 "$PORT"; do
       if port_in_use "$p"; then
         red "Port $p is already in use on this host."
         if [ "$p" = "80" ] || [ "$p" = "443" ]; then
-          echo "  Domain mode runs Caddy on 80 + 443 — these must be free."
-          echo "  Stop the conflicting service (often nginx/apache/another reverse proxy) and re-run."
+          echo "  The bundled Caddy sidecar binds 80 + 443 for HTTPS."
+          echo "  If you'd rather manage your own reverse proxy, re-run with:"
+          echo "    MAILLAYER_NO_CADDY=1 curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
         else
           echo "  Re-run with a different port:"
-          echo "    MAILLAYER_PORT=8025 ${0##*/}   (or include in the curl-pipe env)"
+          echo "    MAILLAYER_PORT=8025 curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
         fi
         exit 1
       fi
@@ -126,22 +130,6 @@ require_ports_free() {
       echo "    MAILLAYER_PORT=8025 curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
       exit 1
     fi
-  fi
-}
-
-require_domain_inputs() {
-  [ -z "$DOMAIN" ] && return 0
-  if [ -z "$ACME_EMAIL" ]; then
-    red "MAILLAYER_DOMAIN is set but MAILLAYER_EMAIL is missing."
-    echo "  Let's Encrypt requires a contact email for cert issuance + expiry alerts."
-    echo "  Re-run with both:"
-    echo "    MAILLAYER_DOMAIN=mail.example.com MAILLAYER_EMAIL=you@example.com \\"
-    echo "      curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
-    exit 1
-  fi
-  # Default APP_URL so tracking links + unsubscribe URLs use the public domain.
-  if [ -z "$APP_URL" ]; then
-    APP_URL="https://$DOMAIN"
   fi
 }
 
@@ -161,53 +149,22 @@ EOF
   chmod 600 "$INSTALL_DIR/.env"
 }
 
-write_compose() {
-  if [ -n "$DOMAIN" ]; then
-    bold "[2/4] Writing docker-compose.yml + Caddyfile (domain: $DOMAIN)…"
-    cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
-services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - maillayer
-
-  maillayer:
-    image: $IMAGE
-    restart: unless-stopped
-    # Loopback-only so the host healthcheck can hit /api/health without
-    # exposing the upstream port to the internet — Caddy handles public TLS.
-    ports:
-      - "127.0.0.1:$PORT:3000"
-    volumes:
-      - maillayer-data:/app/data
-    env_file:
-      - .env
-
-volumes:
-  maillayer-data:
-  caddy-data:
-  caddy-config:
-EOF
-    cat > "$INSTALL_DIR/Caddyfile" <<EOF
+# Caddy starts with this minimal init config — just binds the admin API
+# to the docker network so the maillayer container can push the real
+# config (placeholder when no domain, reverse proxy when one is set).
+write_caddy_init() {
+  cat > "$INSTALL_DIR/caddy-init.json" <<'EOF'
 {
-    email $ACME_EMAIL
-}
-
-$DOMAIN {
-    encode gzip
-    reverse_proxy maillayer:3000
+  "admin": {
+    "listen": "0.0.0.0:2019"
+  }
 }
 EOF
-  else
-    bold "[2/4] Writing docker-compose.yml…"
+}
+
+write_compose() {
+  if [ "$NO_CADDY" = "1" ]; then
+    bold "[2/4] Writing docker-compose.yml (single-service: no Caddy)…"
     cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
 services:
   maillayer:
@@ -219,15 +176,62 @@ services:
       - maillayer-data:/app/data
     env_file:
       - .env
+    environment:
+      - MAILLAYER_NO_CADDY=1
 
 volumes:
   maillayer-data:
+EOF
+  else
+    bold "[2/4] Writing docker-compose.yml + Caddy init…"
+    write_caddy_init
+    cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Start with the minimal init config; maillayer's boot hook posts the
+    # real config (placeholder or domain) to the admin API at :2019.
+    command: ["caddy", "run", "--config", "/etc/caddy/init.json"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy-init.json:/etc/caddy/init.json:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - maillayer-net
+
+  maillayer:
+    image: $IMAGE
+    restart: unless-stopped
+    ports:
+      - "$PORT:3000"
+    volumes:
+      - maillayer-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - CADDY_ADMIN_URL=http://caddy:2019
+    networks:
+      - maillayer-net
+    depends_on:
+      - caddy
+
+volumes:
+  maillayer-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  maillayer-net:
 EOF
   fi
 }
 
 start() {
-  bold "[3/4] Pulling image + starting…"
+  bold "[3/4] Pulling images + starting…"
   ( cd "$INSTALL_DIR" && docker compose pull && docker compose up -d )
 }
 
@@ -237,21 +241,17 @@ wait_healthy() {
   for i in $(seq 1 30); do
     if curl -fsS "http://localhost:$PORT/api/health" >/dev/null 2>&1; then
       echo
-      if [ -n "$DOMAIN" ]; then
-        green "✓ maillayer is up at https://${DOMAIN}"
-        echo "  Caddy is requesting a Let's Encrypt cert in the background — this can"
-        echo "  take 30–60s on first start. If the page doesn't load yet, give it a"
-        echo "  minute and check Caddy logs:"
-        echo "    docker compose -f $INSTALL_DIR/docker-compose.yml logs caddy"
-        echo
-        echo "  DNS reminder: an A/AAAA record for ${DOMAIN} must point at this host's"
-        echo "  public IP, otherwise ACME validation will fail."
-      else
-        local host_ip
-        host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
-        green "✓ maillayer is up at http://${host_ip}:$PORT"
-      fi
+      local host_ip
+      host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+      green "✓ maillayer is up at http://${host_ip}:$PORT"
       echo "  Open the URL in a browser and sign up to create the owner account."
+      if [ "$NO_CADDY" != "1" ]; then
+        echo
+        echo "  To attach a custom domain with auto-HTTPS:"
+        echo "    1. Point an A record for the domain at this server's public IP."
+        echo "    2. Open Settings → Domain in the dashboard and enter the domain."
+        echo "    3. Caddy issues a Let's Encrypt cert in 30–60s. Done."
+      fi
       echo "  Config + secret: $INSTALL_DIR"
       echo
       echo "Useful commands:"
@@ -270,7 +270,6 @@ wait_healthy() {
 main() {
   require_root
   require_docker
-  require_domain_inputs
   require_ports_free
   mkdir -p "$INSTALL_DIR"
   write_env

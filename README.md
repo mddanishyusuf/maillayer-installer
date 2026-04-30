@@ -13,29 +13,36 @@ That's it — even on a fresh box. If Docker isn't installed, the script will in
 The script:
 
 1. Auto-installs Docker + Docker Compose v2 if they aren't already present.
-2. Checks that the host port (default `8024`) is free.
+2. Checks that ports `80`, `443`, and `8024` are free on the host.
 3. Generates a unique `AUTH_SECRET` (saved at `/opt/maillayer/.env`, mode 600).
-4. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1`.
-5. Starts the service via Docker Compose with a managed volume for your data.
-6. Waits for `/api/health` and prints the URL.
+4. Writes a 2-service `docker-compose.yml` (Caddy + Maillayer) and a tiny Caddy init config.
+5. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1` and `caddy:2-alpine`.
+6. Starts both containers with managed volumes, waits for `/api/health`, prints the URL.
 
-## Install with a custom domain + auto-TLS
+## Adding a custom domain
 
-Pass a domain and contact email to enable a built-in Caddy reverse proxy with Let's Encrypt:
+The bundled Caddy sidecar is **wired up but inert at install time** — it listens on 80/443 with an empty config and waits for you to add a domain through the dashboard.
+
+After install, sign in at `http://<your-server-ip>:8024` and go to **Settings → Domain**:
+
+1. Enter your domain (e.g. `mail.example.com`) and a contact email.
+2. Make sure an A record for that domain points at this server's public IP.
+3. Click **Save & request certificate**.
+
+Caddy issues a Let's Encrypt cert in the background (typically 30–60s). The page polls and flips the status pill from **Issuing cert…** to **Live** when the cert is active. You're done — `https://mail.example.com` now reverse-proxies to Maillayer.
+
+You can change or remove the domain at any time from the same page.
+
+## Skipping the bundled Caddy
+
+If you already run a reverse proxy (nginx, Cloudflare Tunnel, Traefik, etc.), set `MAILLAYER_NO_CADDY=1` to install Maillayer alone — single-service compose, port `8024` only:
 
 ```sh
-MAILLAYER_DOMAIN=mail.example.com \
-MAILLAYER_EMAIL=you@example.com \
+MAILLAYER_NO_CADDY=1 \
   curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash
 ```
 
-What this changes:
-
-- A `caddy:2-alpine` container is added on ports 80 + 443. It auto-issues and renews a Let's Encrypt certificate for your domain.
-- The maillayer container binds to `127.0.0.1:8024` (loopback only) — the only public ingress is Caddy.
-- `APP_URL` is set to `https://<your-domain>` so tracking + unsubscribe links use the real URL.
-
-DNS prerequisite: an A/AAAA record for the domain must already point at this host's public IP, otherwise ACME validation fails. The cert request happens in the background on first start (~30–60s).
+In that mode the Settings → Domain page renders an "Managed externally" notice instead of the form — point your existing proxy at the Maillayer container's mapped port and set `APP_URL` in `/opt/maillayer/.env` to your public URL so tracking links resolve correctly.
 
 ### Prefer to read first?
 
@@ -57,11 +64,10 @@ MAILLAYER_DIR=/var/lib/maillayer \
 | Env var | Default | Purpose |
 |---|---|---|
 | `MAILLAYER_DIR` | `/opt/maillayer` | Install root |
-| `MAILLAYER_PORT` | `8024` | Host port (loopback-only when `MAILLAYER_DOMAIN` is set) |
-| `MAILLAYER_URL` | (empty) | Public URL — auto-set to `https://$MAILLAYER_DOMAIN` in domain mode |
-| `MAILLAYER_IMAGE` | `ghcr.io/mddanishyusuf/maillayer-pro:1` | Image tag (pin to `:v1.1.0` for a fixed version) |
-| `MAILLAYER_DOMAIN` | (empty) | Public domain — turns on Caddy reverse proxy |
-| `MAILLAYER_EMAIL` | (empty) | ACME contact email — required when `MAILLAYER_DOMAIN` is set |
+| `MAILLAYER_PORT` | `8024` | Local-IP dashboard port (always exposed for ssh-tunnel access) |
+| `MAILLAYER_URL` | (empty) | Public URL — set this if you proxy externally (`MAILLAYER_NO_CADDY=1` mode) |
+| `MAILLAYER_IMAGE` | `ghcr.io/mddanishyusuf/maillayer-pro:1` | Image tag (pin to `:v1.2.0` for a fixed version) |
+| `MAILLAYER_NO_CADDY` | `0` | Set to `1` to skip the bundled Caddy sidecar — bring your own reverse proxy |
 | `MAILLAYER_NO_AUTO_DOCKER` | `0` | Set to `1` to disable the Docker auto-install — useful if you manage Docker yourself |
 
 ## Maintenance
@@ -82,8 +88,12 @@ cd /opt/maillayer && docker compose down
 ## What gets installed
 
 - `/opt/maillayer/.env` — your `AUTH_SECRET` and any other operator-set env vars (mode 600).
-- `/opt/maillayer/docker-compose.yml` — the service definition.
-- A Docker named volume `maillayer_maillayer-data` — holds the SQLite database and nightly backups.
+- `/opt/maillayer/docker-compose.yml` — the 2-service definition (Caddy + Maillayer), or single-service if `MAILLAYER_NO_CADDY=1`.
+- `/opt/maillayer/caddy-init.json` — minimal Caddy startup config (admin endpoint binding only). Maillayer pushes the real config via the admin API.
+- Docker named volumes:
+  - `maillayer_maillayer-data` — SQLite database, nightly backups, encryption key.
+  - `maillayer_caddy-data` — issued certs, ACME state.
+  - `maillayer_caddy-config` — Caddy's autosave (current effective config).
 
 ## Security note
 
