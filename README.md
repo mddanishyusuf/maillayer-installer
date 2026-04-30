@@ -12,10 +12,29 @@ curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 
 The script:
 
-1. Generates a unique `AUTH_SECRET` (saved at `/opt/maillayer/.env`, mode 600).
-2. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1`.
-3. Starts the service via Docker Compose with a managed volume for your data.
-4. Waits for `/api/health` and prints the URL.
+1. Checks that Docker + Docker Compose v2 are present and the host port (default `8024`) is free.
+2. Generates a unique `AUTH_SECRET` (saved at `/opt/maillayer/.env`, mode 600).
+3. Pulls the public Docker image `ghcr.io/mddanishyusuf/maillayer-pro:1`.
+4. Starts the service via Docker Compose with a managed volume for your data.
+5. Waits for `/api/health` and prints the URL.
+
+## Install with a custom domain + auto-TLS
+
+Pass a domain and contact email to enable a built-in Caddy reverse proxy with Let's Encrypt:
+
+```sh
+MAILLAYER_DOMAIN=mail.example.com \
+MAILLAYER_EMAIL=you@example.com \
+  curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash
+```
+
+What this changes:
+
+- A `caddy:2-alpine` container is added on ports 80 + 443. It auto-issues and renews a Let's Encrypt certificate for your domain.
+- The maillayer container binds to `127.0.0.1:8024` (loopback only) — the only public ingress is Caddy.
+- `APP_URL` is set to `https://<your-domain>` so tracking + unsubscribe links use the real URL.
+
+DNS prerequisite: an A/AAAA record for the domain must already point at this host's public IP, otherwise ACME validation fails. The cert request happens in the background on first start (~30–60s).
 
 ### Prefer to read first?
 
@@ -33,6 +52,15 @@ MAILLAYER_URL=https://mail.example.com \
 MAILLAYER_DIR=/var/lib/maillayer \
   curl -fsSL https://install.maillayer.com/install.sh | sudo bash
 ```
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `MAILLAYER_DIR` | `/opt/maillayer` | Install root |
+| `MAILLAYER_PORT` | `8024` | Host port (loopback-only when `MAILLAYER_DOMAIN` is set) |
+| `MAILLAYER_URL` | (empty) | Public URL — auto-set to `https://$MAILLAYER_DOMAIN` in domain mode |
+| `MAILLAYER_IMAGE` | `ghcr.io/mddanishyusuf/maillayer-pro:1` | Image tag (pin to `:v1.1.0` for a fixed version) |
+| `MAILLAYER_DOMAIN` | (empty) | Public domain — turns on Caddy reverse proxy |
+| `MAILLAYER_EMAIL` | (empty) | ACME contact email — required when `MAILLAYER_DOMAIN` is set |
 
 ## Maintenance
 
