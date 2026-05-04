@@ -199,18 +199,14 @@ EOF
 # config (placeholder when no domain, reverse proxy when one is set).
 write_caddy_init() {
   # `origins` is required because Caddy's admin endpoint enforces an
-  # allow-list against the request Host. Auto-populated from `listen`
-  # it would only accept Host: 0.0.0.0:2019 — but our requests come
-  # from the maillayer container with Host: caddy:2019.
-  #
-  # The protocol-relative `//host:port` form is required: a bare
-  # "caddy:2019" gets parsed by Go's url.Parse as scheme:opaque (host
-  # empty) and never matches the request's Host header.
+  # allow-list against the request's Origin header. We use the full
+  # `http://host:port` form — empirically that's the one Caddy actually
+  # matches against an incoming Origin: http://caddy:2019.
   cat > "$INSTALL_DIR/caddy-init.json" <<'EOF'
 {
   "admin": {
     "listen": "0.0.0.0:2019",
-    "origins": ["//caddy:2019", "//localhost:2019", "//0.0.0.0:2019"]
+    "origins": ["http://caddy:2019", "http://localhost:2019", "http://0.0.0.0:2019"]
   }
 }
 EOF
