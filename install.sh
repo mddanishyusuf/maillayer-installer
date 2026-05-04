@@ -106,6 +106,15 @@ port_in_use() {
 }
 
 require_ports_free() {
+  # On an upgrade, our own caddy + maillayer containers are holding the
+  # ports we'd otherwise complain about. Detect that and skip the check —
+  # the upcoming `compose up --force-recreate` will recycle them in
+  # place. Fresh installs still get the full collision check.
+  if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    echo "  (existing install detected at $INSTALL_DIR — skipping port-collision check)"
+    return 0
+  fi
+
   if [ "$NO_CADDY" != "1" ]; then
     # Caddy needs 80 + 443. The maillayer container exposes PORT for the
     # local-IP dashboard regardless.
