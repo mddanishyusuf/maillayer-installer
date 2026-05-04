@@ -49,6 +49,41 @@ require_root() {
   fi
 }
 
+apt_locked() {
+  # Returns 0 if any of the standard apt/dpkg locks are currently held.
+  # Used to detect cloud-init / unattended-upgrades running in the
+  # background on a freshly provisioned VPS — a very common cause of
+  # `Could not get lock /var/lib/apt/lists/lock` from get.docker.com.
+  local f
+  for f in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock; do
+    [ -f "$f" ] || continue
+    if command -v flock >/dev/null 2>&1; then
+      flock -n "$f" -c true 2>/dev/null || return 0
+    elif command -v fuser >/dev/null 2>&1; then
+      fuser "$f" >/dev/null 2>&1 && return 0
+    fi
+  done
+  return 1
+}
+
+wait_for_apt() {
+  apt_locked || return 0
+  bold "Another apt/dpkg process is running (likely cloud-init or unattended-upgrades on a fresh VPS)."
+  echo "  Waiting up to 5 min for it to finish before running the Docker installer…"
+  local i
+  for i in $(seq 1 60); do
+    sleep 5
+    if ! apt_locked; then
+      echo "  apt is free. Continuing."
+      return 0
+    fi
+  done
+  red "apt is still locked after 5 min."
+  echo "  See what's holding it: ps aux | grep -E 'apt|dpkg|unattended-upgrade'"
+  echo "  Wait for that process to finish, then re-run this script."
+  exit 1
+}
+
 install_docker() {
   bold "Docker not found — auto-installing via https://get.docker.com…"
   echo "  This is Docker Inc's official installer. Takes ~60s on a typical VPS"
@@ -56,6 +91,7 @@ install_docker() {
   echo "  To skip and install Docker yourself, re-run with:"
   echo "    MAILLAYER_NO_AUTO_DOCKER=1 curl -fsSL https://install.maillayer.com/install.sh | sudo -E bash"
   echo
+  wait_for_apt
   if ! curl -fsSL https://get.docker.com | sh; then
     red "Docker auto-install failed."
     echo "  Install manually following https://docs.docker.com/engine/install/"
