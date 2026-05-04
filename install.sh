@@ -153,10 +153,15 @@ EOF
 # to the docker network so the maillayer container can push the real
 # config (placeholder when no domain, reverse proxy when one is set).
 write_caddy_init() {
+  # `origins` is required because Caddy's admin endpoint enforces an
+  # allow-list against the request Host header. Auto-populated from
+  # `listen` it would only accept Host: 0.0.0.0:2019 — but our requests
+  # come from the maillayer container with Host: caddy:2019.
   cat > "$INSTALL_DIR/caddy-init.json" <<'EOF'
 {
   "admin": {
-    "listen": "0.0.0.0:2019"
+    "listen": "0.0.0.0:2019",
+    "origins": ["caddy:2019", "localhost:2019", "0.0.0.0:2019"]
   }
 }
 EOF
@@ -232,7 +237,11 @@ EOF
 
 start() {
   bold "[3/4] Pulling images + starting…"
-  ( cd "$INSTALL_DIR" && docker compose pull && docker compose up -d )
+  # --force-recreate ensures bind-mounted file changes (caddy-init.json,
+  # docker-compose.yml) actually get picked up on a re-run of the
+  # installer — `up -d` alone won't recreate a container if only the
+  # mounted file content changed.
+  ( cd "$INSTALL_DIR" && docker compose pull && docker compose up -d --force-recreate )
 }
 
 wait_healthy() {
