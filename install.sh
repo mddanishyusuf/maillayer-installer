@@ -38,6 +38,16 @@ APP_URL="${MAILLAYER_URL:-}"
 IMAGE="${MAILLAYER_IMAGE:-ghcr.io/mddanishyusuf/maillayer-pro:1}"
 NO_CADDY="${MAILLAYER_NO_CADDY:-0}"
 
+# Split $IMAGE into base + tag so the container can pass them to the
+# Docker daemon at self-update time (POST /images/create takes them
+# separately). Falls back to ":1" if the operator passed an untagged
+# image — that's our default rolling tag.
+IMAGE_BASE="${IMAGE%:*}"
+IMAGE_TAG="${IMAGE##*:}"
+if [ "$IMAGE_BASE" = "$IMAGE_TAG" ]; then
+  IMAGE_TAG="1"
+fi
+
 red()    { printf "\033[0;31m%s\033[0m\n" "$*"; }
 green()  { printf "\033[0;32m%s\033[0m\n" "$*"; }
 bold()   { printf "\033[1m%s\033[0m\n" "$*"; }
@@ -224,10 +234,18 @@ services:
       - "$PORT:3000"
     volumes:
       - maillayer-data:/app/data
+      # Lets the dashboard's "Update now" button pull the new image and
+      # restart this container without the operator SSHing in. Mounted
+      # rw so the container can issue restart commands. Comment this
+      # line out if your security model forbids it; the dashboard will
+      # fall back to the manual copy-the-command flow.
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
     environment:
       - MAILLAYER_NO_CADDY=1
+      - MAILLAYER_PULL_IMAGE=$IMAGE_BASE
+      - MAILLAYER_PULL_TAG=$IMAGE_TAG
 
 volumes:
   maillayer-data:
@@ -260,10 +278,14 @@ services:
       - "$PORT:3000"
     volumes:
       - maillayer-data:/app/data
+      # See note above re: dashboard self-update via Docker socket.
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
     environment:
       - CADDY_ADMIN_URL=http://caddy:2019
+      - MAILLAYER_PULL_IMAGE=$IMAGE_BASE
+      - MAILLAYER_PULL_TAG=$IMAGE_TAG
     networks:
       - maillayer-net
     depends_on:
